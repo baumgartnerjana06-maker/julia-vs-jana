@@ -84,7 +84,7 @@ async function syncInsert(log){
   const {data,error}=await state.supabase.from("workout_logs").insert(payload).select().single();
   if(error){
     console.error("Cloud insert failed:", error);
-    $("message").textContent="Nicht synchronisiert – bitte Internetverbindung prüfen.";
+    $("message").textContent="Sync fehlgeschlagen: " + (error.message || "Unbekannter Fehler");
     return null;
   }
   return data;
@@ -166,10 +166,10 @@ $("logBtn").addEventListener("click",async()=>{
       saveLocal();
       render();
     } else {
-      state.logs=state.logs.filter(x=>x!==log);
-      state.exercises=[...new Set(state.logs.map(x=>x.exercise))];
+      log.sync_failed=true;
       saveLocal();
       render();
+      $("message").textContent="Eintrag gespeichert, aber Sync fehlgeschlagen.";
       return;
     }
   }
