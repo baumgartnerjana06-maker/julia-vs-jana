@@ -1,0 +1,9 @@
+{
+  "name":"Julia vs Jana — Strong Girl Battle",
+  "short_name":"Strong Girl Battle",
+  "start_url":".",
+  "display":"standalone",
+  "background_color":"#f7f4ef",
+  "theme_color":"#f7f4ef",
+  "icons":[]
+}

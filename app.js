@@ -1,0 +1,192 @@
+const state = {
+  person: "julia",
+  exercises: JSON.parse(localStorage.getItem("sgb_exercises") || "null") || [],
+  logs: JSON.parse(localStorage.getItem("sgb_logs") || "[]"),
+  supabase: null,
+  editingId: null
+};
+
+const $ = id => document.getElementById(id);
+
+function saveLocal(){
+  localStorage.setItem("sgb_logs", JSON.stringify(state.logs));
+  localStorage.setItem("sgb_exercises", JSON.stringify(state.exercises));
+}
+function qualifying(log){ return Number(log.sets) >= 3 && Number(log.reps) >= 8; }
+function best(person, exercise){
+  const xs = state.logs.filter(x => x.person === person && x.exercise === exercise && qualifying(x));
+  return xs.length ? Math.max(...xs.map(x => Number(x.weight))) : null;
+}
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
+}
+
+function render(){
+  const select = $("exerciseSelect");
+  select.innerHTML = state.exercises.map(e => `<option value="${escapeHtml(e)}">${escapeHtml(e)}</option>`).join("") + `<option value="__new__">＋ Neue Übung…</option>`;
+  if(!state.exercises.length) select.value = "__new__";
+
+  const board = $("battleboard");
+  board.innerHTML = state.exercises.length ? state.exercises.map(exercise => {
+    const j = best("julia", exercise), n = best("jana", exercise);
+    return `<article class="exercise-card">
+      <div class="exercise-top"><span class="exercise-name">${escapeHtml(exercise)}</span><span class="exercise-note">bester Wert</span></div>
+      <div class="compare">
+        <div class="lift julia"><b>${j === null ? "—" : j + " kg"}</b><span>JULIA · 3×8+</span></div>
+        <div class="arrow">↔</div>
+        <div class="lift jana"><b>${n === null ? "—" : n + " kg"}</b><span>JANA · 3×8+</span></div>
+      </div>
+    </article>`;
+  }).join("") : `<div class="empty-board"><strong>Noch keine Übungen.</strong><span>Tragt euer erstes Gewicht ein und die Übung erscheint hier.</span></div>`;
+
+  const recent = [...state.logs].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).slice(0,12);
+  $("history").innerHTML = recent.length ? recent.map(x => `
+    <div class="history-item">
+      <div class="history-main">
+        <strong class="${x.person}-text">${x.person === "julia" ? "Julia" : "Jana"}</strong>
+        <span>${escapeHtml(x.exercise)} · ${x.sets} × ${x.reps}${qualifying(x) ? " · zählt" : " · Training"}</span>
+      </div>
+      <div class="history-side">
+        <div class="history-weight">${x.weight} kg</div>
+        <div class="history-actions">
+          <button class="text-btn edit-log" data-id="${x.id ?? x.created_at}">Bearbeiten</button>
+          <button class="text-btn delete-log" data-id="${x.id ?? x.created_at}">Löschen</button>
+        </div>
+      </div>
+    </div>`).join("") : `<p class="tiny">Noch keine Einträge.</p>`;
+
+  document.querySelectorAll(".edit-log").forEach(btn => btn.addEventListener("click", () => startEdit(btn.dataset.id)));
+  document.querySelectorAll(".delete-log").forEach(btn => btn.addEventListener("click", () => deleteLog(btn.dataset.id)));
+
+  document.querySelectorAll(".person").forEach(b => b.classList.toggle("active", b.dataset.person === state.person));
+  $("newExerciseWrap").classList.toggle("visible", select.value === "__new__");
+}
+
+async function syncLoad(){
+  if(!state.supabase) return;
+  const {data,error}=await state.supabase.from("workout_logs").select("*").order("created_at",{ascending:false}).limit(500);
+  if(!error && data){
+    state.logs=data;
+    state.exercises=[...new Set(data.map(x=>x.exercise))];
+    saveLocal(); render();
+  }
+}
+async function syncInsert(log){
+  if(!state.supabase) return null;
+  const {data,error}=await state.supabase.from("workout_logs").insert(log).select().single();
+  if(error){ $("message").textContent="Lokal gespeichert, aber Cloud-Sync fehlgeschlagen."; return null; }
+  return data;
+}
+async function syncUpdate(log){
+  if(!state.supabase || !log.id) return;
+  const {error}=await state.supabase.from("workout_logs").update({
+    person:log.person, exercise:log.exercise, weight:log.weight, sets:log.sets, reps:log.reps
+  }).eq("id",log.id);
+  if(error) $("message").textContent="Änderung lokal gespeichert, aber Cloud-Sync fehlgeschlagen.";
+}
+async function syncDelete(log){
+  if(!state.supabase || !log.id) return;
+  const {error}=await state.supabase.from("workout_logs").delete().eq("id",log.id);
+  if(error) $("message").textContent="Lokal gelöscht, aber Cloud-Sync fehlgeschlagen.";
+}
+function findLog(key){
+  return state.logs.find(x => String(x.id ?? x.created_at) === String(key));
+}
+function startEdit(key){
+  const log=findLog(key); if(!log) return;
+  state.editingId=key;
+  state.person=log.person;
+  render();
+  $("exerciseSelect").value=log.exercise;
+  $("newExerciseWrap").classList.remove("visible");
+  $("weightInput").value=log.weight;
+  $("setsInput").value=log.sets;
+  $("repsInput").value=log.reps;
+  $("logBtn").textContent="Änderung speichern";
+  document.querySelector(".log-card").scrollIntoView({behavior:"smooth",block:"center"});
+}
+async function deleteLog(key){
+  const log=findLog(key); if(!log) return;
+  if(!confirm("Eintrag wirklich löschen?")) return;
+  state.logs=state.logs.filter(x => x !== log);
+  state.exercises=[...new Set(state.logs.map(x=>x.exercise))];
+  saveLocal(); render();
+  await syncDelete(log);
+  $("message").textContent="Eintrag gelöscht.";
+}
+
+$("exerciseSelect").addEventListener("change",()=>{
+  $("newExerciseWrap").classList.toggle("visible",$("exerciseSelect").value==="__new__");
+});
+
+$("logBtn").addEventListener("click",async()=>{
+  const weight=Number($("weightInput").value), sets=Number($("setsInput").value), reps=Number($("repsInput").value);
+  let exercise=$("exerciseSelect").value;
+  if(exercise==="__new__" || !exercise){
+    exercise=$("newExerciseInput").value.trim();
+    if(!exercise){ $("message").textContent="Gebt der Übung zuerst einen Namen."; return; }
+  }
+  if(!weight || weight<0 || !sets || !reps){ $("message").textContent="Bitte Gewicht, Sets und Reps eintragen."; return; }
+
+  if(!state.exercises.some(e=>e.toLowerCase()===exercise.toLowerCase())) state.exercises.push(exercise);
+  const canonicalExercise=state.exercises.find(e=>e.toLowerCase()===exercise.toLowerCase());
+  const previousBest=best(state.person,canonicalExercise);
+  const otherPerson=state.person==="julia"?"jana":"julia";
+  const otherBest=best(otherPerson,canonicalExercise);
+  let log;
+  if(state.editingId){
+    log=findLog(state.editingId);
+    if(!log) return;
+    log.person=state.person; log.exercise=canonicalExercise; log.weight=weight; log.sets=sets; log.reps=reps;
+    saveLocal(); render();
+    await syncUpdate(log);
+    state.editingId=null;
+    $("logBtn").textContent="Eintragen 💪";
+  } else {
+    log={person:state.person,exercise:canonicalExercise,weight,sets,reps,created_at:new Date().toISOString()};
+    state.logs.push(log); saveLocal(); render();
+    const cloudLog=await syncInsert(log);
+    if(cloudLog){
+      const i=state.logs.indexOf(log);
+      if(i>=0) state.logs[i]=cloudLog;
+      saveLocal();
+    }
+  }
+  $("exerciseSelect").value=canonicalExercise; $("newExerciseWrap").classList.remove("visible");
+
+  const isNewBest=qualifying(log) && (previousBest===null || Number(log.weight)>Number(previousBest));
+  const overtook=qualifying(log) && otherBest!==null && Number(log.weight)>Number(otherBest) && (previousBest===null || Number(previousBest)<=Number(otherBest));
+
+  if(overtook){
+    const winner=state.person==="julia"?"Julia":"Jana";
+    const loser=state.person==="julia"?"Jana":"Julia";
+    $("message").innerHTML=`<strong>${winner} hat ${loser} überholt!</strong><br><span>Ab ins Gym ${loser}.</span>`;
+  } else if(isNewBest){
+    const increase=previousBest===null?null:Number(log.weight)-Number(previousBest);
+    $("message").textContent=increase===null?"Neues Bestgewicht! 💪":`Neues Bestgewicht! +${increase} kg`;
+  } else if(qualifying(log)) {
+    $("message").textContent="Eingetragen. Zählt. 💪";
+  } else {
+    $("message").textContent="Als Training eingetragen — 3×8 zählt.";
+  }
+  $("weightInput").value="";
+});
+
+document.querySelectorAll(".person").forEach(b=>b.addEventListener("click",()=>{state.person=b.dataset.person;render();}));
+$("addExerciseBtn").addEventListener("click",()=>{
+  document.querySelector(".log-card").scrollIntoView({behavior:"smooth",block:"center"});
+  $("exerciseSelect").value="__new__"; $("newExerciseWrap").classList.add("visible"); $("newExerciseInput").focus();
+});
+$("settingsBtn").addEventListener("click",()=>{
+  $("supabaseUrl").value=localStorage.getItem("sgb_url")||""; $("supabaseKey").value=localStorage.getItem("sgb_key")||""; $("settingsDialog").showModal();
+});
+$("closeSettings").addEventListener("click",()=>$("settingsDialog").close());
+$("saveSettings").addEventListener("click",async()=>{
+  const url=$("supabaseUrl").value.trim(),key=$("supabaseKey").value.trim(); if(!url||!key)return;
+  localStorage.setItem("sgb_url",url); localStorage.setItem("sgb_key",key); state.supabase=window.supabase.createClient(url,key);
+  $("settingsDialog").close(); await syncLoad(); $("message").textContent="Cloud-Sync verbunden. ♡";
+});
+(async function init(){
+  const url=localStorage.getItem("sgb_url"),key=localStorage.getItem("sgb_key");
+  if(url&&key){state.supabase=window.supabase.createClient(url,key);await syncLoad();} render();
+})();
