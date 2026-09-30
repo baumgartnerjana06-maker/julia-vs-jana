@@ -29,3 +29,6 @@ The app deliberately uses only the anon/public key. Never put a Supabase service
 
 ## Hosting
 The files are static and can be hosted on GitHub Pages, Netlify, Vercel, Cloudflare Pages, etc.
+
+
+Version 13: Supabase URL and publishable browser key are built into app.js. No per-device setup is required. Cloud data is loaded on startup, and failed inserts are no longer kept as misleading local-only entries.

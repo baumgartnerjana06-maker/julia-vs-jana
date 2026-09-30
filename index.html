@@ -104,12 +104,10 @@
     <div class="dialog-inner">
       <button class="close" id="closeSettings">×</button>
       <p class="eyebrow">SYNC</p>
-      <h2>Battleboard verbinden</h2>
-      <p>Tragt auf beiden Handys dieselben Supabase-Daten ein. Dann werden eure Einträge automatisch synchronisiert.</p>
-      <label>Supabase URL<input id="supabaseUrl" placeholder="https://xxxx.supabase.co"></label>
-      <label>Supabase anon key<input id="supabaseKey" placeholder="eyJ..."></label>
-      <button class="primary-btn" id="saveSettings">Speichern & verbinden</button>
-      <p class="tiny">Für ein privates Zwei-Personen-Board nutzt das SQL aus dem Download. Niemals den Service-Role-Key hier eintragen.</p>
+      <h2>Cloud-Sync</h2>
+      <p>Das Battleboard ist automatisch verbunden. Auf beiden Handys und am Mac wird dieselbe Supabase-Tabelle verwendet.</p>
+      <button class="primary-btn" id="refreshCloud">Jetzt synchronisieren</button>
+      <p class="tiny">Wenn ein Eintrag nicht in der Cloud gespeichert werden kann, zeigt die Website jetzt eine Fehlermeldung statt ihn nur lokal zu behalten.</p>
     </div>
   </dialog>
 

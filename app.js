@@ -1,3 +1,6 @@
+const SUPABASE_URL = "https://rlstjndrealqtrkfadxn.supabase.co";
+const SUPABASE_KEY = "sb_publishable_hlBUdyFioH88CCdd69byqw_zLWcWVHi";
+
 const state = {
   person: "julia",
   exercises: JSON.parse(localStorage.getItem("sgb_exercises") || "null") || [],
@@ -63,31 +66,42 @@ function render(){
 }
 
 async function syncLoad(){
-  if(!state.supabase) return;
+  if(!state.supabase) return false;
   const {data,error}=await state.supabase.from("workout_logs").select("*").order("created_at",{ascending:false}).limit(500);
-  if(!error && data){
-    state.logs=data;
-    state.exercises=[...new Set(data.map(x=>x.exercise))];
-    saveLocal(); render();
+  if(error){
+    console.error("Cloud load failed:", error);
+    $("message").textContent="Cloud-Sync konnte nicht geladen werden.";
+    return false;
   }
+  state.logs=data || [];
+  state.exercises=[...new Set(state.logs.map(x=>x.exercise))];
+  saveLocal(); render();
+  return true;
 }
 async function syncInsert(log){
   if(!state.supabase) return null;
-  const {data,error}=await state.supabase.from("workout_logs").insert(log).select().single();
-  if(error){ $("message").textContent="Lokal gespeichert, aber Cloud-Sync fehlgeschlagen."; return null; }
+  const payload={person:log.person,exercise:log.exercise,weight:log.weight,sets:log.sets,reps:log.reps,created_at:log.created_at};
+  const {data,error}=await state.supabase.from("workout_logs").insert(payload).select().single();
+  if(error){
+    console.error("Cloud insert failed:", error);
+    $("message").textContent="Nicht synchronisiert – bitte Internetverbindung prüfen.";
+    return null;
+  }
   return data;
 }
 async function syncUpdate(log){
-  if(!state.supabase || !log.id) return;
+  if(!state.supabase || !log.id) return false;
   const {error}=await state.supabase.from("workout_logs").update({
     person:log.person, exercise:log.exercise, weight:log.weight, sets:log.sets, reps:log.reps
   }).eq("id",log.id);
-  if(error) $("message").textContent="Änderung lokal gespeichert, aber Cloud-Sync fehlgeschlagen.";
+  if(error){ console.error(error); $("message").textContent="Änderung konnte nicht synchronisiert werden."; return false; }
+  return true;
 }
 async function syncDelete(log){
-  if(!state.supabase || !log.id) return;
+  if(!state.supabase || !log.id) return false;
   const {error}=await state.supabase.from("workout_logs").delete().eq("id",log.id);
-  if(error) $("message").textContent="Lokal gelöscht, aber Cloud-Sync fehlgeschlagen.";
+  if(error){ console.error(error); $("message").textContent="Löschen konnte nicht synchronisiert werden."; return false; }
+  return true;
 }
 function findLog(key){
   return state.logs.find(x => String(x.id ?? x.created_at) === String(key));
@@ -150,6 +164,13 @@ $("logBtn").addEventListener("click",async()=>{
       const i=state.logs.indexOf(log);
       if(i>=0) state.logs[i]=cloudLog;
       saveLocal();
+      render();
+    } else {
+      state.logs=state.logs.filter(x=>x!==log);
+      state.exercises=[...new Set(state.logs.map(x=>x.exercise))];
+      saveLocal();
+      render();
+      return;
     }
   }
   $("exerciseSelect").value=canonicalExercise; $("newExerciseWrap").classList.remove("visible");
@@ -178,15 +199,27 @@ $("addExerciseBtn").addEventListener("click",()=>{
   $("exerciseSelect").value="__new__"; $("newExerciseWrap").classList.add("visible"); $("newExerciseInput").focus();
 });
 $("settingsBtn").addEventListener("click",()=>{
-  $("supabaseUrl").value=localStorage.getItem("sgb_url")||""; $("supabaseKey").value=localStorage.getItem("sgb_key")||""; $("settingsDialog").showModal();
+  $("settingsDialog").showModal();
 });
 $("closeSettings").addEventListener("click",()=>$("settingsDialog").close());
-$("saveSettings").addEventListener("click",async()=>{
-  const url=$("supabaseUrl").value.trim(),key=$("supabaseKey").value.trim(); if(!url||!key)return;
-  localStorage.setItem("sgb_url",url); localStorage.setItem("sgb_key",key); state.supabase=window.supabase.createClient(url,key);
-  $("settingsDialog").close(); await syncLoad(); $("message").textContent="Cloud-Sync verbunden. ♡";
+$("refreshCloud").addEventListener("click",async()=>{
+  $("refreshCloud").disabled=true;
+  $("refreshCloud").textContent="Lade…";
+  const ok=await syncLoad();
+  $("refreshCloud").disabled=false;
+  $("refreshCloud").textContent="Jetzt synchronisieren";
+  if(ok) $("message").textContent="Cloud-Sync aktuell.";
+  $("settingsDialog").close();
 });
+
 (async function init(){
-  const url=localStorage.getItem("sgb_url"),key=localStorage.getItem("sgb_key");
-  if(url&&key){state.supabase=window.supabase.createClient(url,key);await syncLoad();} render();
+  try{
+    state.supabase=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+    const ok=await syncLoad();
+    if(!ok) render();
+  }catch(err){
+    console.error(err);
+    render();
+    $("message").textContent="Cloud-Sync konnte nicht gestartet werden.";
+  }
 })();
